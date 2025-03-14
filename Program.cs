@@ -8,95 +8,157 @@ namespace MHiRepacker
 {
     internal class Program
     {
-        static string loc = Path.GetDirectoryName(AppContext.BaseDirectory) + "\\";
-        static string Unpack_Input = loc + "Unpack_Input";
-        static string Unpack_Output = loc + "Unpack_Output";
-        static string Repack_Input = loc + "Repack_Input";
-        static string Repack_Output = loc + "Repack_Output";
+        static string inputFile;
+        static bool bUnpack;
         static string exceldata = "exceldata.dat";
+
+        static int mode;
+
+        static string helperStr = @"
+————————————————————————
+params:
+[func] [inputpath] [outputpath] <mode>
+func: unpack/repack
+        unpack: [inputpath] is input File path ,[outputpath] is output Directory path
+        repack: [inputpath] is input Directory path ,[outputpath] is output File path
+mode: mode0/mode1
+        mode0(default): Universal structure (look like exceldata.dat)
+        mode1: Universal structure (look like syokibugu)
+
+
+eg.
+
+unpack G:\exceldata.dat G:\exceldata_unpacked
+repack G:\exceldata_unpacked G:\exceldata.dat
+
+unpack G:\syokibugu.dat G:\syokibugu_unpacked mode1
+repack G:\syokibugu_unpacked G:\syokibugu mode1
+
+————————————————————————
+";
+
+        static void PrintHelperStr()
+        {
+            Console.WriteLine(helperStr);
+            Console.ReadLine();
+        }
 
         static void Main(string[] args)
         {
-            string title = $"MHiRepacker Ver.1.0 By 皓月云 axibug.com";
+
+            string title = $"MHiRepacker Ver.1.3 By 皓月云 axibug.com";
             Console.Title = title;
             Console.WriteLine(title);
 
+            if (args.Length < 3)
+            {
+                PrintHelperStr();
+                return;
+            }
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-
             Encoding shiftencode = Encoding.GetEncoding("Shift-JIS");
 
+            string modecmd = args[0];
 
-            while (true)
+            if (modecmd.ToLower() == "unpack")
+                bUnpack = true;
+            else if (modecmd.ToLower() == "repack")
+                bUnpack = false;
+            else
             {
-                Console.WriteLine("进行的操作:[1]解包Unpack [2]打包Repack");
-                if (int.TryParse(Console.ReadLine(), out int func))
+                PrintHelperStr();
+                return;
+            }
+
+
+            Console.WriteLine($"func=>{args[0].ToLower()}");
+
+            string inputpath;
+            string outputpath;
+            inputpath = args[1];
+            outputpath = args[2];
+
+            if (bUnpack)
+            {
+                if (!File.Exists(inputpath))
                 {
+                    Console.WriteLine($"未找到文件，can not found file: {inputpath}");
+                    PrintHelperStr();
+                    return;
+                }
+            }
+            else if (bUnpack)
+            {
+                if (!Directory.Exists(inputpath))
+                {
+                    Console.WriteLine($"未找到文件，can not found directory: {inputpath}");
+                    PrintHelperStr();
+                    return;
+                }
+            }
+
+            Console.WriteLine($"inputpath=>{inputpath}");
+            Console.WriteLine($"outputpath=>{outputpath}");
+
+            if (args.Length >= 4 && args[3].ToLower() == "mode1")
+                mode = 1;
+            else
+                mode = 0;
+
+            Console.WriteLine($"mode=>mode{mode}");
+
+            bool bResult = false;
 #if !DEBUG
                     try
-#endif
                     {
-                        switch (func)
-                        {
-                            case 1:
-                                Unpack();
-                                break;
-                            case 2:
-                                Repack();
-                                break;
-                        }
-                    }
-
+#endif
+            switch (mode)
+            {
+                case 0:
+                    if (bUnpack) bResult = Unpack_Mode0(inputpath, outputpath);
+                    else bResult = Repack_Mode0(inputpath, outputpath);
+                    break;
+                case 1:
+                    if (bUnpack) bResult = Unpack_Mode1(inputpath, outputpath);
+                    else bResult = Repack_Mode1(inputpath, outputpath);
+                    break;
+            }
 #if !DEBUG
+}
                     catch (Exception ex)
                     {
                         Console.WriteLine("处理异常:" + ex.ToString());
                     }
 #endif
-                }
-            }
+            Console.WriteLine(bResult ? "处理成功" : "处理失败");
         }
 
-        static void Unpack()
+        static bool Unpack_Mode0(string Unpack_Input, string Unpack_Output)
         {
-            if (!Directory.Exists(Unpack_Input))
-            {
-                Console.WriteLine("Unpack_Input文件不存在");
-                return;
-            }
-
+            Console.WriteLine($"开始处理{Unpack_Input}");
             if (!Directory.Exists(Unpack_Output))
             {
-                Console.WriteLine("Unpack_Output文件不存在");
-                return;
+                Directory.CreateDirectory(Unpack_Output);
+                Console.WriteLine($"创建目录{Unpack_Output}");
             }
-            if (!File.Exists(Unpack_Input + "//" + exceldata))
-            {
-                Console.WriteLine($"{Unpack_Input + "//" + exceldata}不存在");
-                return;
-            }
-            Console.WriteLine($"是否开始处理{exceldata}");
-            if (!FileHelper.LoadFile(Unpack_Input + "//" + exceldata, out byte[] data))
+            if (!FileHelper.LoadFile(Unpack_Input, out byte[] inputbytes))
             {
                 Console.WriteLine($"读取失败");
-                return;
+                return false;
             }
 
-            if (!DoUnpack(data))
-            {
-                Console.WriteLine($"处理失败");
-                return;
-            }
-            return;
+            return Unpack_Mode0_logic(inputbytes, 0, Unpack_Output, out uint WorkedDataLenght);
         }
 
-        static bool DoUnpack(byte[] data)
+        static bool Unpack_Mode0_logic(byte[] inputbytes, uint startPos, string Unpack_Output, out uint WorkedDataLenght)
         {
-            int StartHead = 0x01;
-
+            WorkedDataLenght = 0;
+            uint StartHead = 0x01;
+            WorkedDataLenght += StartHead;
             byte[] StartHeadEndArr = { 0x50, 0x4B, 0x03, 0x04, 0x14 };//PK
 
             List<string> tempLog = new List<string>();
-            int pos = StartHead;
+            uint pos = startPos + StartHead;
             bool CheckStartEnd(byte[] temp, int startIdx)
             {
                 for (int i = 0; i < StartHeadEndArr.Length; i++)
@@ -107,21 +169,22 @@ namespace MHiRepacker
                 return false;
             }
 
-            List<int> SizeList = new List<int>();
+            List<uint> SizeList = new List<uint>();
             try
             {
                 int idx = 0;
-                int StartContentPtr = 0;
+                uint StartContentPtr = 0;
                 string log;
                 tempLog.Add("文件头读取：");
-                while (CheckStartEnd(data, pos) && CheckStartEnd(data, pos + 1))
+                while (CheckStartEnd(inputbytes, (int)pos) && CheckStartEnd(inputbytes, (int)pos + 1))
                 {
-                    int size = HexHelper.bytesToInt(data, 2, pos);
+                    uint size = HexHelper.bytesToUInt(inputbytes, 2, (int)pos);
                     SizeList.Add(size);
-                    log = $"lenght:[{idx++}]=>{size}({size.ToString("X")})| byte src: 0x{data[pos].ToString("X")} 0x{data[pos + 1].ToString("X")}";
+                    log = $"lenght:[{idx++}]=>{size}({size.ToString("X")})| byte src: 0x{inputbytes[pos].ToString("X")} 0x{inputbytes[pos + 1].ToString("X")}";
                     Console.WriteLine(log);
                     tempLog.Add(log);
                     pos += 2;
+                    WorkedDataLenght += 2;
                 }
                 log = $"读取完毕共{SizeList.Count}个";
                 Console.WriteLine(log);
@@ -133,9 +196,10 @@ namespace MHiRepacker
                     string filename = Unpack_Output + $"\\{i.ToString().PadLeft(3, '0')}.zip";
                     using (FileStream fs = new FileStream(filename, FileMode.Create))
                     {
-                        fs.Write(data, StartContentPtr, SizeList[i]);
+                        fs.Write(inputbytes, (int)StartContentPtr, (int)SizeList[i]);
                     }
                     StartContentPtr += SizeList[i];
+                    WorkedDataLenght += SizeList[i];
 
                     log = $"写入{filename}";
                     Console.WriteLine(log);
@@ -146,46 +210,43 @@ namespace MHiRepacker
                 log = $"Unpack完毕，共{SizeList.Count}个.zip";
                 Console.WriteLine(log);
                 tempLog.Add(log);
-                if(File.Exists(Unpack_Output + $"//filelist.txt"))
+                if (File.Exists(Unpack_Output + $"//filelist.txt"))
                     File.Delete(Unpack_Output + $"//filelist.txt");
 
                 File.WriteAllLines(Unpack_Output + $"//filelist.txt", tempLog);
+
                 return true;
             }
             catch (Exception e)
             {
+                WorkedDataLenght = 0;
                 return false;
             }
         }
 
-
-        static void Repack()
+        static bool Repack_Mode0(string Repack_Input, string Unpack_Output)
         {
-            if (!Directory.Exists(Repack_Input))
+            string outputdir = Path.GetDirectoryName(Unpack_Output);
+            if (!Directory.Exists(outputdir))
             {
-                Console.WriteLine("Repack_Input文件不存在");
-                return;
+                Directory.CreateDirectory(outputdir);
+                Console.WriteLine($"创建目录{outputdir}");
+            }
+            if (File.Exists(Unpack_Output + $".txt"))
+                File.Delete(Unpack_Output + $".txt");
+            List<string> tempLog = new List<string>();
+            using (FileStream fs = new FileStream(Unpack_Output, FileMode.Create))
+            {
+                Repack_Mode0_logic(Repack_Input,fs, Unpack_Output,ref tempLog);
             }
 
-            if (!Directory.Exists(Unpack_Output))
-            {
-                Console.WriteLine("Unpack_Output文件不存在");
-                return;
-            }
-
-
-            if (!DoRepack())
-            {
-                Console.WriteLine($"处理失败");
-                return;
-            }
-            return;
+            File.WriteAllLines(Unpack_Output + $".txt", tempLog);
+            return true;
         }
 
-        static bool DoRepack()
+        static bool Repack_Mode0_logic(string Repack_Input,FileStream fs, string Unpack_Output,ref List<string> tempLog,bool skip_y = false)
         {
-            int StartHead = 0x01;
-            string[] zipfiles = FileHelper.GetDirFile(Unpack_Output).Where(w => w.ToLower().EndsWith(".zip")).ToArray();
+            string[] zipfiles = FileHelper.GetDirFile(Repack_Input).Where(w => w.ToLower().EndsWith(".zip")).ToArray();
             List<byte[]> files = new List<byte[]>();
 
             Console.WriteLine($"-----------原数据读取完毕-----------");
@@ -204,56 +265,232 @@ namespace MHiRepacker
                 }
             }
 
-            Console.WriteLine($"共{files.Count}个文件，是否处理? (y/n)");
+            if (!skip_y)
+            {
+                Console.WriteLine($"共{files.Count}个文件，是否处理? (y/n)");
+                string yn = Console.ReadLine();
+                if (yn.ToLower() != "y")
+                    return false;
+            }
+
+            string log;
+            fs.WriteByte((byte)files.Count);
+            log = $"写入文件个数{files.Count}=>0x{files.Count.ToString("X")}";
+            Console.WriteLine(log);
+            tempLog.Add(log);
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                int lenght = files[i].Length;
+
+                byte[] lenghtdata = HexHelper.uintToBytes(lenght);
+                int lenghtVal = Math.Min(2, lenghtdata.Length);
+                fs.Write(lenghtdata, 0, lenghtVal);
+                if (lenghtdata.Length == 1)
+                    fs.WriteByte(0);
+
+                log = $"写入第[{i}]个文件大小{lenght}到文件头";
+                Console.WriteLine(log);
+                tempLog.Add(log);
+            }
+
+            log = $"文件头写入完毕";
+
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                fs.Write(files[i], 0, files[i].Length);
+                log = $"写入第[{i}]个文件";
+                Console.WriteLine(log);
+                tempLog.Add(log);
+            }
+
+
+            log = $"Repack完毕：{Unpack_Output}";
+            Console.WriteLine(log);
+            tempLog.Add(log);
+
+            return true;
+        }
+
+        static bool Unpack_Mode1(string Unpack_Input, string Unpack_Output)
+        {
+            Console.WriteLine($"开始处理{Unpack_Input}");
+
+            if (!Directory.Exists(Unpack_Output))
+            {
+                Directory.CreateDirectory(Unpack_Output);
+                Console.WriteLine($"创建目录{Unpack_Output}");
+            }
+
+
+            if (!FileHelper.LoadFile(Unpack_Input, out byte[] fulldata))
+            {
+                Console.WriteLine($"读取失败");
+                return false;
+            }
+
+            int subPackIdx = 0;
+            uint Pos = 0;
+            while (Pos < fulldata.Length)
+            {
+                Console.WriteLine($"----- 开始处理:SubPack[{subPackIdx}] -----");
+                string SubPackOutDir = Path.Combine(Unpack_Output, subPackIdx.ToString().PadLeft(4, '0'));
+                if (!Directory.Exists(SubPackOutDir))
+                {
+                    Directory.CreateDirectory(SubPackOutDir);
+                    Console.WriteLine($"创建目录{SubPackOutDir}");
+                }
+
+                if (!Unpack_Mode0_logic(fulldata, Pos, SubPackOutDir, out uint WorkedDataLenght))
+                {
+                    Console.WriteLine($"SubPack[{subPackIdx}],处理失败");
+                    return false;
+                }
+                Pos += WorkedDataLenght;
+
+                //处理非0x00
+                Console.WriteLine($"----- 处理:SubPack[{subPackIdx}]后续非0x00数据 -----");
+                List<byte> temp_Not0 = new List<byte>();
+                while (true)
+                {
+                    if (Pos + 1 < fulldata.Length && fulldata[Pos + 1] != 0x00)
+                    {
+                        Pos += 1;
+                        temp_Not0.Add(fulldata[Pos]);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                string tail_not0 = Path.Combine(SubPackOutDir, "tail_not0");
+                byte[] read_data_not0 = temp_Not0.ToArray();
+                using (FileStream fs = new FileStream(tail_not0, FileMode.Create))
+                {
+                    fs.Write(read_data_not0, 0, read_data_not0.Length);
+                }
+                Console.WriteLine($"----- SubPack[{subPackIdx}]后续非0x00数据,Length:{read_data_not0.Length}存储到{tail_not0} -----");
+
+
+                //处理0x00
+                Console.WriteLine($"----- 处理:SubPack[{subPackIdx}]后续0x00数据 -----");
+                List<byte> temp_0 = new List<byte>();
+                while (true)
+                {
+                    if (Pos +1 < fulldata.Length && fulldata[Pos + 1] == 0x00)
+                    {
+                        Pos += 1;
+                        temp_0.Add(fulldata[Pos]);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                string tail_0 = Path.Combine(SubPackOutDir, "tail");
+                byte[] read_data_0 = temp_0.ToArray();
+                using (FileStream fs = new FileStream(tail_0, FileMode.Create))
+                {
+                    fs.Write(read_data_0, 0, read_data_0.Length);
+                }
+
+                Console.WriteLine($"----- SubPack[{subPackIdx}]后续0x00数据,Length:{read_data_0.Length}存储到{tail_0} -----");
+
+                Console.WriteLine($"----- 处理完毕:SubPack[{subPackIdx}] -----");
+                subPackIdx++;
+                Pos += 1;
+            }
+
+            return true;
+
+        }
+
+        readonly static int[] subpacklenght = { 14336, 7600, 1500, 28400 };
+
+        static bool Repack_Mode1(string Repack_Input, string Repack_Output)
+        {
+            string outputdir = Path.GetDirectoryName(Repack_Output);
+            if (!Directory.Exists(outputdir))
+            {
+                Directory.CreateDirectory(outputdir);
+                Console.WriteLine($"创建目录{outputdir}");
+            }
+
+            string[] dirs = Directory.GetDirectories(Repack_Input);
+            for (int i = 0; i < dirs.Length; i++)
+                Console.WriteLine($"发现目录:{dirs[i]}");
+
+            Console.WriteLine($"共{dirs.Length}个目录，是否处理? (y/n)");
             string yn = Console.ReadLine();
             if (yn.ToLower() != "y")
                 return false;
 
             List<string> tempLog = new List<string>();
             string log;
-            using (FileStream fs = new FileStream(Repack_Output + "//" + exceldata, FileMode.Create))
+            if (File.Exists(Repack_Output + $".txt"))
+                File.Delete(Repack_Output + $".txt");
+
+            using (FileStream fs = new FileStream(Repack_Output, FileMode.Create))
             {
-                fs.WriteByte((byte)files.Count);
-                log = $"写入文件个数{files.Count}=>0x{files.Count.ToString("X")}";
-                Console.WriteLine(log);
-                tempLog.Add(log);
-
-                for (int i = 0; i < files.Count; i++)
+                for (int subpack_idx = 0; subpack_idx < dirs.Length; subpack_idx++)
                 {
-                    int lenght = files[i].Length;
+                    string subdir =  dirs[subpack_idx];
 
-                    byte[] lenghtdata = HexHelper.intToBytes(lenght);
-                    int lenghtVal = Math.Min(2, lenghtdata.Length);
-                    fs.Write(lenghtdata, 0, lenghtVal);
-                    if (lenghtdata.Length == 1)
-                        fs.WriteByte(0);
+                    log = $"-- 开始写入Subpack[{subpack_idx}]:下的zip包";
+                    Console.WriteLine(log);
+                    tempLog.Add(log);
+                    Repack_Mode0_logic(subdir, fs, Repack_Output,ref tempLog,true);
+                    log = $"-- 完成写入Subpack[{subpack_idx}]:下的zip包";
+                    Console.WriteLine(log);
+                    tempLog.Add(log);
 
-                    log = $"写入第[{i}]个文件大小{lenght}到文件头";
+                    string tail_not0 = Path.Combine(subdir, "tail_not0");
+                    log = $"-- 开始写入Subpack[{subpack_idx}]:下的非0x00数据:{tail_not0}";
+                    Console.WriteLine(log);
+                    tempLog.Add(log);
+                    if (!FileHelper.LoadFile(tail_not0, out byte[] inputbytes_not0))
+                    {
+                        Console.WriteLine($"读取失败");
+                        return false;
+                    }
+                    fs.Write(inputbytes_not0, 0, inputbytes_not0.Length);
+                    log = $"-- 完成写入Subpack[{subpack_idx}]:下的非0x00数据:length{inputbytes_not0.Length}";
+                    Console.WriteLine(log);
+                    tempLog.Add(log);
+
+
+                    int targetSize = 0;
+                    for (int sizeidx = 0; sizeidx <= subpack_idx; sizeidx++)
+                        targetSize += subpacklenght[sizeidx];
+
+                    long needAdd = (targetSize - fs.Length);
+
+                    log = $"-- 需要补0x00长度:{needAdd}";
+                    Console.WriteLine(log);
+                    tempLog.Add(log);
+
+                    if (needAdd < 0)
+                    {
+                        Console.WriteLine($"--Subpack[{ subpack_idx}],超出MHi预设区间大小");
+                        return false;
+                    }
+
+                    log = $"-- 开始写入Subpack[{subpack_idx}]:下的0x00数据";
+                    Console.WriteLine(log);
+                    tempLog.Add(log);
+                    for (int i = 0; i < needAdd; i++)
+                        fs.WriteByte(0x00);
+                    log = $"-- 完成写入Subpack[{subpack_idx}]:下的0x00数据:length{needAdd}";
                     Console.WriteLine(log);
                     tempLog.Add(log);
                 }
-
-                log = $"文件头写入完毕";
-
-
-                for (int i = 0; i < files.Count; i++)
-                {
-                    fs.Write(files[i], 0, files[i].Length);
-                    log = $"写入第[{i}]个文件";
-                    Console.WriteLine(log);
-                    tempLog.Add(log);
-                }
-
             }
-
-            log = $"Repack完毕：{Repack_Output + "//" + exceldata}";
-            Console.WriteLine(log);
-            tempLog.Add(log);
-            if (File.Exists(Repack_Output + $"//filelist.txt"))
-                File.Delete(Repack_Output + $"//filelist.txt");
-
-            File.WriteAllLines(Repack_Output + $"//filelist.txt", tempLog);
+            File.WriteAllLines(Repack_Output + $".txt", tempLog);
             return true;
         }
+
     }
 }

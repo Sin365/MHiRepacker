@@ -79,6 +79,13 @@ namespace MHiRepacker
         {
             return BitConverter.GetBytes(value);
         }
+        /**  
+        * int 转 byte[] byte高位在前
+        */
+        public static byte[] uintToBytes(int value)
+        {
+            return BitConverter.GetBytes(value);
+        }
 
         /**  
         * 从字节读取字符串
