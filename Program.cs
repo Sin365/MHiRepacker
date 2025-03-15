@@ -1,8 +1,4 @@
-﻿using System;
-using System.Drawing;
-using System.Reflection;
-using System.Text;
-using static System.Runtime.InteropServices.JavaScript.JSType;
+﻿using System.Text;
 
 namespace MHiRepacker
 {
@@ -17,23 +13,18 @@ namespace MHiRepacker
         static string helperStr = @"
 ————————————————————————
 params:
-[func] [inputpath] [outputpath] <mode>
+[func] [inputpath] [outputpath]
 func: unpack/repack
         unpack: [inputpath] is input File path ,[outputpath] is output Directory path
         repack: [inputpath] is input Directory path ,[outputpath] is output File path
-mode: mode0/mode1
-        mode0(default): Universal structure (look like exceldata.dat)
-        mode1: Universal structure (look like syokibugu)
-
 
 eg.
 
 unpack G:\exceldata.dat G:\exceldata_unpacked
 repack G:\exceldata_unpacked G:\exceldata.dat
 
-unpack G:\syokibugu.dat G:\syokibugu_unpacked mode1
-repack G:\syokibugu_unpacked G:\syokibugu mode1
-
+unpack G:\syokibugu.dat G:\syokibugu_unpacked
+repack G:\syokibugu_unpacked G:\syokibugu
 ————————————————————————
 ";
 
@@ -46,7 +37,7 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
         static void Main(string[] args)
         {
 
-            string title = $"MHiRepacker Ver.1.3 By 皓月云 axibug.com";
+            string title = $"MHiRepacker Ver.1.4 By 皓月云 axibug.com";
             Console.Title = title;
             Console.WriteLine(title);
 
@@ -60,23 +51,14 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
 
             string modecmd = args[0];
 
-            if (modecmd.ToLower() == "unpack")
-                bUnpack = true;
-            else if (modecmd.ToLower() == "repack")
-                bUnpack = false;
-            else
-            {
-                PrintHelperStr();
-                return;
-            }
-
-
             Console.WriteLine($"func=>{args[0].ToLower()}");
 
             string inputpath;
             string outputpath;
             inputpath = args[1];
             outputpath = args[2];
+            Console.WriteLine($"inputpath=>{inputpath}");
+            Console.WriteLine($"outputpath=>{outputpath}");
 
             if (bUnpack)
             {
@@ -97,15 +79,53 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
                 }
             }
 
-            Console.WriteLine($"inputpath=>{inputpath}");
-            Console.WriteLine($"outputpath=>{outputpath}");
-
-            if (args.Length >= 4 && args[3].ToLower() == "mode1")
-                mode = 1;
+            if (modecmd.ToLower() == "unpack")
+            {
+                bUnpack = true;
+                if (!FileHelper.LoadFile(inputpath, out byte[] inputbytes))
+                {
+                    Console.WriteLine($"读取失败:{inputpath}");
+                    PrintHelperStr();
+                    return;
+                }
+                List<uint> SizeList = new List<uint>();
+                List<string> tempLog = new List<string>();
+                uint WorkedDataLenght = 0;
+                if (!TryGetheadWithCheck(inputbytes, 0, false, ref SizeList, ref tempLog, out int checkmode, ref WorkedDataLenght))
+                {
+                    Console.WriteLine($"读取失败,文件以0x00起始，:{inputpath}");
+                    PrintHelperStr();
+                    return;
+                }
+                mode = checkmode;
+            }
+            else if (modecmd.ToLower() == "repack")
+            {
+                bUnpack = false;
+                string[] dirs = Directory.GetDirectories(inputpath).Select(w => new DirectoryInfo(w).Name).ToArray();
+                if (dirs.Length == 4 &&
+                    dirs.Contains("0000") &&
+                    dirs.Contains("0001") &&
+                    dirs.Contains("0002") &&
+                    dirs.Contains("0003")
+                    )
+                    mode = 1;
+                else
+                    mode = 0;
+            }
             else
-                mode = 0;
+            {
+                PrintHelperStr();
+                return;
+            }
 
-            Console.WriteLine($"mode=>mode{mode}");
+
+            //if (args.Length >= 4 && args[3].ToLower() == "mode1")
+            //    mode = 1;
+            //else
+            //    mode = 0;
+
+            Console.WriteLine($"audo mode=>mode{mode}");
 
             bool bResult = false;
 #if !DEBUG
@@ -150,37 +170,85 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
             return Unpack_Mode0_logic(inputbytes, 0, Unpack_Output, out uint WorkedDataLenght);
         }
 
+        readonly static uint StartHead = 0x01;
+        readonly static byte[] StartPKHead = { 0x50, 0x4B, 0x03, 0x04, 0x14 };//PK
+        static bool CheckPKHead(byte[] temp, int startIdx)
+        {
+            for (int i = 0; i < StartPKHead.Length; i++)
+            {
+                startIdx++;
+                if (startIdx < temp.Length && StartPKHead[i] != temp[startIdx])
+                    return false;
+            }
+            return true;
+        }
+        static bool TryGetheadWithCheck(byte[] inputbytes, uint startPos, bool skipConsoleLog, ref List<uint> SizeList, ref List<string> tempLog, out int checkmode, ref uint WorkedDataLenght)
+        {
+            if (inputbytes[0] == 0x00)
+            {
+                checkmode = default;
+                return false;
+            }
+            WorkedDataLenght += StartHead;
+            uint pos = startPos + StartHead;
+            //bool CheckStartEnd(byte[] temp, int startIdx)
+            //{
+            //    for (int i = 0; i < StartHeadEndArr.Length; i++)
+            //    {
+            //        if (StartHeadEndArr[i] != temp[startIdx++])
+            //            return true;
+            //    }
+            //    return false;
+            //}
+
+            //int idx = 0;
+            uint StartContentPtr = 0;
+            string log;
+
+            log = $"文件头读取：";
+            if (!skipConsoleLog) Console.WriteLine(log);
+            tempLog.Add(log);
+
+            //while (CheckStartEnd(inputbytes, (int)pos) && CheckStartEnd(inputbytes, (int)pos + 1))
+            for (int idx = 0; idx < inputbytes[0]; idx++)
+            {
+                uint size = HexHelper.bytesToUInt(inputbytes, 2, (int)pos);
+                SizeList.Add(size);
+                log = $"lenght:[{idx}]=>{size}({size.ToString("X")})| byte src: 0x{inputbytes[pos].ToString("X")} 0x{inputbytes[pos + 1].ToString("X")}";
+                if (!skipConsoleLog) Console.WriteLine(log);
+                tempLog.Add(log);
+                pos += 2;
+                WorkedDataLenght += 2;
+            }
+            log = $"读取完毕共{SizeList.Count}个";
+            if (!skipConsoleLog) Console.WriteLine(log);
+            tempLog.Add(log);
+
+            long packagelenght = WorkedDataLenght + SizeList.Sum(w => w);
+            checkmode = inputbytes.Length == packagelenght ? 0 : 1;
+            return true;
+        }
         static bool Unpack_Mode0_logic(byte[] inputbytes, uint startPos, string Unpack_Output, out uint WorkedDataLenght)
         {
             WorkedDataLenght = 0;
             uint StartHead = 0x01;
             WorkedDataLenght += StartHead;
-            byte[] StartHeadEndArr = { 0x50, 0x4B, 0x03, 0x04, 0x14 };//PK
+            //byte[] StartHeadEndArr = { 0x50, 0x4B, 0x03, 0x04, 0x14 };//PK
 
             List<string> tempLog = new List<string>();
             uint pos = startPos + StartHead;
-            bool CheckStartEnd(byte[] temp, int startIdx)
-            {
-                for (int i = 0; i < StartHeadEndArr.Length; i++)
-                {
-                    if (StartHeadEndArr[i] != temp[startIdx++])
-                        return true;
-                }
-                return false;
-            }
-
             List<uint> SizeList = new List<uint>();
             try
             {
-                int idx = 0;
                 uint StartContentPtr = 0;
                 string log;
                 tempLog.Add("文件头读取：");
-                while (CheckStartEnd(inputbytes, (int)pos) && CheckStartEnd(inputbytes, (int)pos + 1))
+                //while (CheckStartEnd(inputbytes, (int)pos) && CheckStartEnd(inputbytes, (int)pos + 1))
+                for (int idx = 0; idx < inputbytes[0]; idx++)
                 {
                     uint size = HexHelper.bytesToUInt(inputbytes, 2, (int)pos);
                     SizeList.Add(size);
-                    log = $"lenght:[{idx++}]=>{size}({size.ToString("X")})| byte src: 0x{inputbytes[pos].ToString("X")} 0x{inputbytes[pos + 1].ToString("X")}";
+                    log = $"lenght:[{idx}]=>{size}({size.ToString("X")})| byte src: 0x{inputbytes[pos].ToString("X")} 0x{inputbytes[pos + 1].ToString("X")}";
                     Console.WriteLine(log);
                     tempLog.Add(log);
                     pos += 2;
@@ -207,7 +275,7 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
                 }
 
 
-                log = $"Unpack完毕，共{SizeList.Count}个.zip";
+                log = $"Unpack完毕，共{SizeList.Count}个文件";
                 Console.WriteLine(log);
                 tempLog.Add(log);
                 if (File.Exists(Unpack_Output + $"//filelist.txt"))
@@ -237,14 +305,14 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
             List<string> tempLog = new List<string>();
             using (FileStream fs = new FileStream(Unpack_Output, FileMode.Create))
             {
-                Repack_Mode0_logic(Repack_Input,fs, Unpack_Output,ref tempLog);
+                Repack_Mode0_logic(Repack_Input, fs, Unpack_Output, ref tempLog);
             }
 
             File.WriteAllLines(Unpack_Output + $".txt", tempLog);
             return true;
         }
 
-        static bool Repack_Mode0_logic(string Repack_Input,FileStream fs, string Unpack_Output,ref List<string> tempLog,bool skip_y = false)
+        static bool Repack_Mode0_logic(string Repack_Input, FileStream fs, string Unpack_Output, ref List<string> tempLog, bool skip_y = false)
         {
             string[] zipfiles = FileHelper.GetDirFile(Repack_Input).Where(w => w.ToLower().EndsWith(".zip")).ToArray();
             List<byte[]> files = new List<byte[]>();
@@ -379,7 +447,7 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
                 List<byte> temp_0 = new List<byte>();
                 while (true)
                 {
-                    if (Pos +1 < fulldata.Length && fulldata[Pos + 1] == 0x00)
+                    if (Pos + 1 < fulldata.Length && fulldata[Pos + 1] == 0x00)
                     {
                         Pos += 1;
                         temp_0.Add(fulldata[Pos]);
@@ -437,12 +505,12 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
             {
                 for (int subpack_idx = 0; subpack_idx < dirs.Length; subpack_idx++)
                 {
-                    string subdir =  dirs[subpack_idx];
+                    string subdir = dirs[subpack_idx];
 
                     log = $"-- 开始写入Subpack[{subpack_idx}]:下的zip包";
                     Console.WriteLine(log);
                     tempLog.Add(log);
-                    Repack_Mode0_logic(subdir, fs, Repack_Output,ref tempLog,true);
+                    Repack_Mode0_logic(subdir, fs, Repack_Output, ref tempLog, true);
                     log = $"-- 完成写入Subpack[{subpack_idx}]:下的zip包";
                     Console.WriteLine(log);
                     tempLog.Add(log);
@@ -474,7 +542,7 @@ repack G:\syokibugu_unpacked G:\syokibugu mode1
 
                     if (needAdd < 0)
                     {
-                        Console.WriteLine($"--Subpack[{ subpack_idx}],超出MHi预设区间大小");
+                        Console.WriteLine($"--Subpack[{subpack_idx}],超出MHi预设区间大小");
                         return false;
                     }
 
